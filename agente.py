@@ -10,19 +10,18 @@ def _get_client():
         api_key = os.getenv("ANTHROPIC_API_KEY")
     return anthropic.Anthropic(api_key=api_key)
 
-from ferramentas import carregar_arquivo, analisar_dados, executar_pandas, gerar_grafico, _get_df
+from ferramentas import analisar_dados, executar_pandas, gerar_grafico, _get_df
 
 FERRAMENTAS = [
     {
         "name": "analisar_dados",
-        "description": "Executa análises exploratórias nos dados já carregados. Use isso antes de responder perguntas sobre os dados.",
+        "description": "Executa análises exploratórias nos dados já carregados.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "operacao": {
                     "type": "string",
-                    "enum": ["resumo", "nulos", "tipos", "primeiras_linhas"],
-                    "description": "resumo: estatísticas descritivas | nulos: valores ausentes | tipos: tipos de dados | primeiras_linhas: preview"
+                    "enum": ["resumo", "nulos", "tipos", "primeiras_linhas"]
                 }
             },
             "required": ["operacao"]
@@ -30,21 +29,18 @@ FERRAMENTAS = [
     },
     {
         "name": "executar_pandas",
-        "description": "Executa código Python/pandas para análises customizadas. Use a variável 'df' e salve o resultado em 'resultado'.",
+        "description": "Executa código Python/pandas. Use a variável 'df' e salve o resultado em 'resultado'.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "codigo": {
-                    "type": "string",
-                    "description": "Ex: resultado = df.groupby('categoria')['vendas'].sum().to_string()"
-                }
+                "codigo": {"type": "string"}
             },
             "required": ["codigo"]
         }
     },
     {
         "name": "gerar_grafico",
-        "description": "Gera visualizações. Sempre gere um gráfico após análises numéricas relevantes.",
+        "description": "Gera visualizações. Sempre gere um gráfico após análises numéricas.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -52,8 +48,8 @@ FERRAMENTAS = [
                     "type": "string",
                     "enum": ["barras", "linha", "histograma", "pizza", "dispersao", "box"]
                 },
-                "coluna_x": {"type": "string", "description": "Coluna principal ou eixo X"},
-                "coluna_y": {"type": "string", "description": "Eixo Y (obrigatório para barras, linha, dispersao)"},
+                "coluna_x": {"type": "string"},
+                "coluna_y": {"type": "string"},
                 "titulo": {"type": "string"}
             },
             "required": ["tipo", "coluna_x"]
@@ -75,20 +71,39 @@ def executar_ferramenta(nome: str, inputs: dict) -> str:
         )
     return "Ferramenta não encontrada."
 
+def _serializar_conteudo(content):
+    """Converte objetos da API Anthropic em dicionários simples para reutilizar no histórico."""
+    if isinstance(content, list):
+        return [_serializar_bloco(b) for b in content]
+    if isinstance(content, str):
+        return content
+    return content
+
+def _serializar_bloco(bloco):
+    """Serializa um bloco individual de conteúdo."""
+    if isinstance(bloco, dict):
+        return bloco
+    t = bloco.type
+    if t == "text":
+        return {"type": "text", "text": bloco.text}
+    elif t == "tool_use":
+        return {"type": "tool_use", "id": bloco.id, "name": bloco.name, "input": bloco.input}
+    elif t == "tool_result":
+        return {"type": "tool_result", "tool_use_id": bloco.tool_use_id, "content": bloco.content}
+    # fallback
+    try:
+        return bloco.model_dump()
+    except Exception:
+        return {"type": t}
+
 def _resumo_df() -> str:
-    """Gera um resumo do dataframe atual para incluir no system prompt."""
     df = _get_df()
     if df is None:
         return "Nenhum arquivo carregado."
     nulos = int(df.isnull().sum().sum())
-    colunas_info = []
-    for col in df.columns:
-        dtype = str(df[col].dtype)
-        n_uniq = df[col].nunique()
-        colunas_info.append(f"  - {col} ({dtype}, {n_uniq} únicos)")
+    colunas_info = [f"  - {col} ({str(df[col].dtype)}, {df[col].nunique()} únicos)" for col in df.columns]
     return (
-        f"Arquivo carregado: {df.shape[0]} linhas x {df.shape[1]} colunas. "
-        f"Valores nulos: {nulos}.\n"
+        f"Arquivo carregado: {df.shape[0]} linhas x {df.shape[1]} colunas. Nulos: {nulos}.\n"
         f"Colunas:\n" + "\n".join(colunas_info)
     )
 
@@ -105,12 +120,12 @@ def rodar_agente(mensagem_usuario: str, historico: list = None) -> tuple:
 ESTADO ATUAL DOS DADOS:
 {_resumo_df()}
 
-REGRAS IMPORTANTES:
-- Os dados JÁ estão carregados. NUNCA peça para o usuário carregar um arquivo ou enviar dados novamente.
-- Use as ferramentas diretamente para analisar — não peça confirmação antes.
+REGRAS:
+- Os dados JÁ estão carregados. NUNCA peça para o usuário enviar ou carregar arquivo.
+- Use as ferramentas diretamente para analisar.
 - Gere gráficos sempre que a análise for numérica ou comparativa.
-- Explique os resultados em linguagem simples e direta.
-- Se não souber o nome exato de uma coluna, use analisar_dados com operacao='tipos' para descobrir.
+- Explique resultados em linguagem simples.
+- Se não souber o nome exato de uma coluna, use analisar_dados com operacao='tipos' primeiro.
 """
 
     while True:
@@ -123,14 +138,17 @@ REGRAS IMPORTANTES:
         )
 
         if resposta.stop_reason == "end_turn":
-            historico.append({"role": "assistant", "content": resposta.content})
+            conteudo_serializado = _serializar_conteudo(resposta.content)
+            historico.append({"role": "assistant", "content": conteudo_serializado})
             for bloco in resposta.content:
                 if hasattr(bloco, "text"):
                     artefatos.append({"tipo": "texto", "conteudo": bloco.text})
             break
 
         if resposta.stop_reason == "tool_use":
-            historico.append({"role": "assistant", "content": resposta.content})
+            conteudo_serializado = _serializar_conteudo(resposta.content)
+            historico.append({"role": "assistant", "content": conteudo_serializado})
+
             resultados = []
             for bloco in resposta.content:
                 if bloco.type == "tool_use":
@@ -143,6 +161,7 @@ REGRAS IMPORTANTES:
                         "tool_use_id": bloco.id,
                         "content": resultado
                     })
+
             historico.append({"role": "user", "content": resultados})
 
     return historico, artefatos
