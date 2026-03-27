@@ -341,7 +341,7 @@ with st.sidebar:
     ]
     for s in sugestoes:
         if st.button(s, key=f"sug_{s}", use_container_width=True):
-    st.session_state["input_chat"] = s
+            st.session_state["input_chat"] = s
 
     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
