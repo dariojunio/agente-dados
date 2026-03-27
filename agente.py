@@ -1,4 +1,5 @@
 import os
+import json
 import anthropic
 
 def _get_client():
@@ -71,21 +72,41 @@ def executar_ferramenta(nome: str, inputs: dict) -> str:
         )
     return "Ferramenta não encontrada."
 
-def _serializar_bloco(bloco):
+def _sanitizar_historico(historico: list) -> list:
     """
-    Converte objetos Anthropic (TextBlock, ToolUseBlock) em dicts limpos.
-    model_dump() inclui campos extras (citations, caller) que a API rejeita.
-    Por isso serializamos manualmente apenas os campos válidos.
+    Garante que o histórico é 100% JSON puro antes de enviar para a API.
+    Remove objetos Python da Anthropic que podem ter vazado para o session_state.
     """
-    if isinstance(bloco, dict):
-        return bloco
-    t = bloco.type
-    if t == "text":
-        return {"type": "text", "text": bloco.text}
-    elif t == "tool_use":
-        return {"type": "tool_use", "id": bloco.id, "name": bloco.name, "input": bloco.input}
-    else:
-        return {"type": t}
+    resultado = []
+    for msg in historico:
+        role = msg["role"]
+        content = msg["content"]
+
+        if isinstance(content, str):
+            resultado.append({"role": role, "content": content})
+            continue
+
+        if isinstance(content, list):
+            blocos = []
+            for bloco in content:
+                if isinstance(bloco, dict):
+                    t = bloco.get("type", "")
+                    if t == "text":
+                        blocos.append({"type": "text", "text": bloco.get("text", "")})
+                    elif t == "tool_use":
+                        blocos.append({"type": "tool_use", "id": bloco["id"], "name": bloco["name"], "input": bloco["input"]})
+                    elif t == "tool_result":
+                        blocos.append({"type": "tool_result", "tool_use_id": bloco["tool_use_id"], "content": bloco["content"]})
+                elif hasattr(bloco, "type"):
+                    t = bloco.type
+                    if t == "text":
+                        blocos.append({"type": "text", "text": bloco.text})
+                    elif t == "tool_use":
+                        blocos.append({"type": "tool_use", "id": bloco.id, "name": bloco.name, "input": bloco.input})
+            if blocos:
+                resultado.append({"role": role, "content": blocos})
+
+    return resultado
 
 def _resumo_df() -> str:
     df = _get_df()
@@ -120,44 +141,52 @@ REGRAS:
 """
 
     while True:
+        # Sanitiza o histórico antes de cada chamada à API
+        historico_limpo = _sanitizar_historico(historico)
+
         resposta = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=4096,
             system=system_prompt,
             tools=FERRAMENTAS,
-            messages=historico
+            messages=historico_limpo
         )
 
         if resposta.stop_reason == "end_turn":
-            # Serializa blocos antes de guardar no histórico
-            historico.append({
-                "role": "assistant",
-                "content": [_serializar_bloco(b) for b in resposta.content]
-            })
+            # Guarda como dicts puros no histórico
+            blocos_limpos = []
             for bloco in resposta.content:
                 if hasattr(bloco, "text"):
+                    blocos_limpos.append({"type": "text", "text": bloco.text})
                     artefatos.append({"tipo": "texto", "conteudo": bloco.text})
+            historico.append({"role": "assistant", "content": blocos_limpos})
             break
 
         if resposta.stop_reason == "tool_use":
-            # Serializa blocos antes de guardar no histórico
-            historico.append({
-                "role": "assistant",
-                "content": [_serializar_bloco(b) for b in resposta.content]
-            })
-
-            resultados = []
+            # Guarda blocos do assistente como dicts puros
+            blocos_assistente = []
+            tool_uses = []
             for bloco in resposta.content:
-                if bloco.type == "tool_use":
-                    resultado = executar_ferramenta(bloco.name, bloco.input)
-                    if resultado.startswith("GRAFICO_BASE64:"):
-                        artefatos.append({"tipo": "imagem", "conteudo": resultado.replace("GRAFICO_BASE64:", "")})
-                        resultado = "Gráfico gerado com sucesso."
-                    resultados.append({
-                        "type": "tool_result",
-                        "tool_use_id": bloco.id,
-                        "content": resultado
-                    })
+                if bloco.type == "text":
+                    blocos_assistente.append({"type": "text", "text": bloco.text})
+                elif bloco.type == "tool_use":
+                    blocos_assistente.append({"type": "tool_use", "id": bloco.id, "name": bloco.name, "input": bloco.input})
+                    tool_uses.append(bloco)
+
+            historico.append({"role": "assistant", "content": blocos_assistente})
+
+            # Executa ferramentas e guarda resultados
+            resultados = []
+            for bloco in tool_uses:
+                resultado = executar_ferramenta(bloco.name, bloco.input)
+                if resultado.startswith("GRAFICO_BASE64:"):
+                    artefatos.append({"tipo": "imagem", "conteudo": resultado.replace("GRAFICO_BASE64:", "")})
+                    resultado = "Gráfico gerado com sucesso."
+                resultados.append({
+                    "type": "tool_result",
+                    "tool_use_id": bloco.id,
+                    "content": resultado
+                })
 
             historico.append({"role": "user", "content": resultados})
 
