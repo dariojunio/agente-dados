@@ -71,16 +71,12 @@ def executar_ferramenta(nome: str, inputs: dict) -> str:
         )
     return "Ferramenta não encontrada."
 
-def _serializar_conteudo(content):
-    """Converte objetos da API Anthropic em dicionários simples para reutilizar no histórico."""
-    if isinstance(content, list):
-        return [_serializar_bloco(b) for b in content]
-    if isinstance(content, str):
-        return content
-    return content
-
 def _serializar_bloco(bloco):
-    """Serializa um bloco individual de conteúdo."""
+    """
+    Converte objetos Anthropic (TextBlock, ToolUseBlock) em dicts limpos.
+    model_dump() inclui campos extras (citations, caller) que a API rejeita.
+    Por isso serializamos manualmente apenas os campos válidos.
+    """
     if isinstance(bloco, dict):
         return bloco
     t = bloco.type
@@ -88,12 +84,7 @@ def _serializar_bloco(bloco):
         return {"type": "text", "text": bloco.text}
     elif t == "tool_use":
         return {"type": "tool_use", "id": bloco.id, "name": bloco.name, "input": bloco.input}
-    elif t == "tool_result":
-        return {"type": "tool_result", "tool_use_id": bloco.tool_use_id, "content": bloco.content}
-    # fallback
-    try:
-        return bloco.model_dump()
-    except Exception:
+    else:
         return {"type": t}
 
 def _resumo_df() -> str:
@@ -104,7 +95,7 @@ def _resumo_df() -> str:
     colunas_info = [f"  - {col} ({str(df[col].dtype)}, {df[col].nunique()} únicos)" for col in df.columns]
     return (
         f"Arquivo carregado: {df.shape[0]} linhas x {df.shape[1]} colunas. Nulos: {nulos}.\n"
-        f"Colunas:\n" + "\n".join(colunas_info)
+        "Colunas:\n" + "\n".join(colunas_info)
     )
 
 def rodar_agente(mensagem_usuario: str, historico: list = None) -> tuple:
@@ -130,7 +121,7 @@ REGRAS:
 
     while True:
         resposta = client.messages.create(
-            model="claude-opus-4-5",
+            model="claude-haiku-4-5-20251001",
             max_tokens=4096,
             system=system_prompt,
             tools=FERRAMENTAS,
@@ -138,16 +129,22 @@ REGRAS:
         )
 
         if resposta.stop_reason == "end_turn":
-            conteudo_serializado = _serializar_conteudo(resposta.content)
-            historico.append({"role": "assistant", "content": conteudo_serializado})
+            # Serializa blocos antes de guardar no histórico
+            historico.append({
+                "role": "assistant",
+                "content": [_serializar_bloco(b) for b in resposta.content]
+            })
             for bloco in resposta.content:
                 if hasattr(bloco, "text"):
                     artefatos.append({"tipo": "texto", "conteudo": bloco.text})
             break
 
         if resposta.stop_reason == "tool_use":
-            conteudo_serializado = _serializar_conteudo(resposta.content)
-            historico.append({"role": "assistant", "content": conteudo_serializado})
+            # Serializa blocos antes de guardar no histórico
+            historico.append({
+                "role": "assistant",
+                "content": [_serializar_bloco(b) for b in resposta.content]
+            })
 
             resultados = []
             for bloco in resposta.content:
