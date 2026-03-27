@@ -1,8 +1,11 @@
 import anthropic
 import json
 from ferramentas import carregar_arquivo, analisar_dados, executar_pandas, gerar_grafico
+import streamlit as st
+import os
 
-client = anthropic.Anthropic()  # pega a chave de ANTHROPIC_API_KEY no ambiente
+api_key = st.secrets.get("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+client = anthropic.Anthropic(api_key=api_key)
 
 FERRAMENTAS = [
     {
