@@ -341,7 +341,7 @@ with st.sidebar:
     ]
     for s in sugestoes:
         if st.button(s, key=f"sug_{s}", use_container_width=True):
-            st.session_state._sugestao = s
+    st.session_state["input_chat"] = s
 
     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
@@ -388,14 +388,11 @@ with col_chat:
     col_input, col_btn = st.columns([5, 1])
     with col_input:
         entrada = st.text_input(
-            "Mensagem",
-            placeholder="Pergunte algo sobre os dados...",
-            label_visibility="collapsed",
-            key="input_chat",
-            value=getattr(st.session_state, "_sugestao", "")
-        )
-        if hasattr(st.session_state, "_sugestao"):
-            del st.session_state._sugestao
+    "Mensagem",
+    placeholder="Pergunte algo sobre os dados...",
+    label_visibility="collapsed",
+    key="input_chat"
+)
 
     with col_btn:
         enviar = st.button("Enviar", use_container_width=True)
@@ -424,6 +421,7 @@ with col_chat:
                         "conteudo": artefato["conteudo"]
                     })
 
+            st.session_state["input_chat"] = ""  # impede o double-run
             st.rerun()
 
 
