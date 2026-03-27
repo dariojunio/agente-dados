@@ -8,16 +8,25 @@ import base64
 _fallback_df = {}
 
 def _get_df():
+    """Retorna o dataframe ativo — do session_state quando no Streamlit, ou do fallback."""
     try:
         import streamlit as st
-        return st.session_state.get("df", None)
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        if get_script_run_ctx() is not None:
+            return st.session_state.get("df", None)
     except Exception:
-        return _fallback_df.get("df")
+        pass
+    return _fallback_df.get("df")
 
 def carregar_dataframe(df: pd.DataFrame) -> str:
+    """Carrega um DataFrame direto (chamado pelo app.py após upload)."""
     try:
         import streamlit as st
-        st.session_state["df"] = df
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        if get_script_run_ctx() is not None:
+            st.session_state["df"] = df
+        else:
+            _fallback_df["df"] = df
     except Exception:
         _fallback_df["df"] = df
     return f"linhas={df.shape[0]}, colunas={df.shape[1]}, colunas={list(df.columns)}"
