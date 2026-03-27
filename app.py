@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import base64
 import io
-from ferramentas import carregar_dataframe, get_dataframe, analisar_dados
+from ferramentas import carregar_dataframe, analisar_dados
 from agente import rodar_agente
 
 # ─── Configuração da página ────────────────────────────────────────────────────
