@@ -261,6 +261,11 @@ if "df" not in st.session_state:
 if "arquivo_nome" not in st.session_state:
     st.session_state.arquivo_nome = None
 
+# Contador para resetar o input sem violar a regra do Streamlit
+# (não é permitido modificar o state de um widget após ele ser renderizado)
+if "input_key" not in st.session_state:
+    st.session_state.input_key = 0
+
 
 # ─── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -341,13 +346,17 @@ with st.sidebar:
     ]
     for s in sugestoes:
         if st.button(s, key=f"sug_{s}", use_container_width=True):
-            st.session_state["input_chat"] = s
+            # Incrementa o key ANTES do rerun para que o novo widget
+            # seja criado sem session_state, aceitando o value da sugestão
+            st.session_state.input_key += 1
+            st.session_state._sugestao = s
 
     st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
     if st.button("🗑 Limpar conversa", use_container_width=True):
         st.session_state.mensagens_ui = []
         st.session_state.historico_agente = []
+        st.session_state.input_key += 1
         st.rerun()
 
 
@@ -384,15 +393,18 @@ with col_chat:
 
     st.markdown("")
 
-    # Input do chat
+    # Input do chat — key dinâmico para permitir reset sem violar regras do Streamlit
     col_input, col_btn = st.columns([5, 1])
     with col_input:
         entrada = st.text_input(
-    "Mensagem",
-    placeholder="Pergunte algo sobre os dados...",
-    label_visibility="collapsed",
-    key="input_chat"
-)
+            "Mensagem",
+            placeholder="Pergunte algo sobre os dados...",
+            label_visibility="collapsed",
+            key=f"input_chat_{st.session_state.input_key}",
+            value=getattr(st.session_state, "_sugestao", "")
+        )
+        if hasattr(st.session_state, "_sugestao"):
+            del st.session_state._sugestao
 
     with col_btn:
         enviar = st.button("Enviar", use_container_width=True)
@@ -421,7 +433,10 @@ with col_chat:
                         "conteudo": artefato["conteudo"]
                     })
 
-            st.session_state["input_chat"] = ""  # impede o double-run
+            # Incrementa o key para criar um input novo (zerado) no próximo render.
+            # Esta é a forma correta de resetar st.text_input no Streamlit —
+            # nunca modificar session_state[key] depois que o widget foi renderizado.
+            st.session_state.input_key += 1
             st.rerun()
 
 
