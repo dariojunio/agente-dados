@@ -1,0 +1,32 @@
+# Streamlit secrets (CRÍTICO — contém API keys)
+.streamlit/secrets.toml
+
+# Ambiente virtual
+venv/
+.venv/
+env/
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Dados carregados pelos usuários
+*.csv
+*.xlsx
+*.xls
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+*.swp
