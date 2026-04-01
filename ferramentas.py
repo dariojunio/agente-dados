@@ -64,13 +64,31 @@ def analisar_dados(operacao: str) -> str:
     except Exception as e:
         return f"Erro: {str(e)}"
 
+_BLOCKLIST = [
+    "import", "subprocess", "__import__", "__builtins__", "__class__",
+    "__mro__", "__subclasses__", "open(", "eval(", "exec(",
+    "os.", "sys.", "shutil", "socket", "urllib", "requests",
+    "pathlib", "builtins", "globals(", "locals(", "vars(",
+    "getattr", "setattr", "delattr", "compile(",
+    # bloqueia funções de leitura de arquivo do pandas
+    "read_csv", "read_excel", "read_json", "read_html",
+    "read_parquet", "read_feather", "read_sql", "read_clipboard",
+    "read_table", "read_fwf", "read_pickle", "read_orc",
+]
+
 def executar_pandas(codigo: str) -> str:
     df = _get_df()
     if df is None:
         return "Nenhum arquivo carregado ainda."
+
+    codigo_lower = codigo.lower()
+    for termo in _BLOCKLIST:
+        if termo.lower() in codigo_lower:
+            return f"Erro: operação não permitida ('{termo}' bloqueado por segurança)."
+
     try:
         local_vars = {"df": df, "pd": pd}
-        exec(codigo, {}, local_vars)
+        exec(codigo, {"__builtins__": {}}, local_vars)
         resultado = local_vars.get("resultado", "Código executado sem variável 'resultado'.")
         return str(resultado)
     except Exception as e:
