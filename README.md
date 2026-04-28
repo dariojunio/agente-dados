@@ -24,8 +24,8 @@ A conversational data analysis agent built with Streamlit and the OpenAI API. Up
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/your-username/agente-dados.git
-cd agente-dados
+git clone https://github.com/dariojunio/data-analysis-agent.git
+cd data-analysis-agent
 ```
 
 ### 2. Install dependencies
